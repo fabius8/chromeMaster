@@ -1,0 +1,10 @@
+settings.json
+config.json
+Chrome-bin/
+extracted_plugins
+pluginsDisable
+USERDATA
+chrome_ports.json
+private.txt
+package-lock.json
+node_modules
