@@ -33,12 +33,14 @@ class ChromeController {
 
     initCommands() {
         // 注册所有命令
-        this.commands.set('metamaskLogin', this.metamaskLogin.bind(this));
         this.commands.set('test', this.test.bind(this));
         this.commands.set('okxLogin', this.okxLogin.bind(this));
         this.commands.set('okxImport', this.okxImport.bind(this));
+        this.commands.set('humanrity', this.humanrity.bind(this));
+
     }
 
+    //命令入口，不可修改
     async control(debugPort, number, command) {
         try {
             const webSocketDebuggerUrl = `http://127.0.0.1:${debugPort}/json/version`;
@@ -63,20 +65,183 @@ class ChromeController {
         }
     }
 
-
-    
-    // 各种命令的具体实现
-    async metamaskLogin(browser, number) {
-        const page = await browser.newPage();
+    async humanrity(browser, number) {
+        let page = null;
         try {
-            console.log(`正在处理 MetaMask 登录 ${number}`);
-            await page.goto('chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/home.html');
-            // 添加 MetaMask 登录相关操作...
-            await page.waitForTimeout(2000);
+            await sleep(2000);
+            // 清理残留页面
+            const okpages = await browser.pages();
+            for (const okPage of okpages) {
+                const url = okPage.url();
+                if (url.includes('mcohilncbfahbmgdjkbpemcciiolgcge') || url.includes('okx.com')) {
+                    await okPage.close();
+                    console.log('已关闭残留 OKX 钱包页面');
+                }
+            }
+    
+            await this.okxLogin(browser, number);
+            page = await browser.newPage();
+            await page.goto('https://testnet.humanity.org/login');
+            await sleep(5000);
+            console.log(`${number} 访问登录页面成功`);
+    
+            // 定义元素检查配置
+            const elementConfigs = [
+                {
+                    selector: '[data-testid="connect-wallet-button"]',
+                    name: 'connectWallet',
+                    timeout: 30000,
+                    action: async () => {
+                        await page.click('[data-testid="connect-wallet-button"]');
+                        console.log('点击 Connect Wallet 按钮成功');
+                    }
+                },
+                {
+                    selector: 'div.iekbcc0.ju367v4.ju367va.ju367v14.ju367v1s',
+                    name: 'metamask',
+                    timeout: 3000,
+                    action: async () => {
+                        await page.click('div.iekbcc0.ju367v4.ju367va.ju367v14.ju367v1s');
+                        console.log('点击 MetaMask 选项成功');
+                        
+                        await sleep(2000);
+                        const pages = await browser.pages();
+                        const metamaskPopup = pages.find(page => {
+                            const url = page.url();
+                            return url.includes('mcohilncbfahbmgdjkbpemcciiolgcge') && url.includes('connect');
+                        });
+    
+                        if (!metamaskPopup) {
+                            throw new Error('未找到 MetaMask 弹窗');
+                        }
+    
+                        console.log('成功获取 MetaMask 弹窗');
+                        await metamaskPopup.waitForSelector('[data-testid="okd-button"]');
+                        console.log('获取连接按钮成功');
+                        await metamaskPopup.click('[data-testid="okd-button"]');
+                        console.log('点击连接按钮成功');
+                    }
+                },
+                {
+                    selector: '[data-testid="rk-auth-message-button"]',
+                    name: 'signMessage',
+                    timeout: 3000,
+                    action: async () => {
+                        await page.click('[data-testid="rk-auth-message-button"]');
+                        console.log('点击 Sign message 按钮成功');
+                        
+                        await sleep(2000);
+                        const pages = await browser.pages();
+                        const notificationPopup = pages.find(page => {
+                            const url = page.url();
+                            return url.includes('mcohilncbfahbmgdjkbpemcciiolgcge') && url.includes('notification');
+                        });
+    
+                        if (!notificationPopup) {
+                            throw new Error('未找到 MetaMask notification 弹窗');
+                        }
+    
+                        console.log('成功获取 MetaMask notification 弹窗');
+                        await sleep(2000);
+                        await notificationPopup.waitForSelector('button.btn-fill-highlight[data-testid="okd-button"]');
+                        await notificationPopup.click('button.btn-fill-highlight[data-testid="okd-button"]');
+                        console.log('点击确认按钮成功');
+                    }
+                },
+                {
+                    selector: 'div.skip',
+                    name: 'skip',
+                    timeout: 30000,
+                    action: async () => {
+                        await page.click('div.skip');
+                        console.log('点击 Skip 按钮成功');
+                    }
+                },
+                {
+                    selector: 'div.bottom[data-v-1fc95287]',
+                    name: 'genisisReward',
+                    timeout: 30000,
+                    action: async () => {
+                        await sleep(2000);
+                        await page.waitForSelector('div.bottom[data-v-1fc95287]', { 
+                            visible: true,
+                            timeout: 5000 
+                        });
+                        const status = await page.evaluate(() => {
+                            const button = document.querySelector('div.bottom');
+                            return {
+                                hasBeenClaimed: button && button.classList.contains('disable'),
+                                buttonText: button ? button.textContent.trim() : '',
+                                exists: !!button
+                            };
+                        });
+                        if (status) {
+                            console.log('奖励已经领取过了');
+                            return; // 或执行其他逻辑
+                        }
+                        await page.click('div.bottom[data-v-1fc95287]');
+                        console.log('点击 genisis 按钮成功');
+                        await sleep(2000);
+                        const pages = await browser.pages();
+                        const notificationPopup = pages.find(page => {
+                            const url = page.url();
+                            return url.includes('mcohilncbfahbmgdjkbpemcciiolgcge') && url.includes('notification');
+                        });
+    
+                        if (!notificationPopup) {
+                            throw new Error('未找到 MetaMask notification 弹窗');
+                        }
+    
+                        console.log('成功获取 MetaMask notification 弹窗');
+                        await sleep(2000);
+                        await notificationPopup.waitForSelector('button.btn-fill-highlight[data-testid="okd-button"]');
+                        await notificationPopup.click('button.btn-fill-highlight[data-testid="okd-button"]');
+                        console.log('成功领取奖励!');
+                    }
+                }
+            ];
+    
+            // 检查元素并执行操作
+            let startIndex = 0;
+            while (startIndex < elementConfigs.length) {
+                const activeConfigs = elementConfigs.slice(startIndex);
+                const checkPromises = activeConfigs.map((config, index) => {
+                    return page.waitForSelector(config.selector, { timeout: config.timeout })
+                        .then(() => ({
+                            index: startIndex + index,
+                            name: config.name,
+                            exists: true,
+                            action: config.action
+                        }))
+                        .catch(() => null);
+                });
+    
+                const result = await Promise.race(checkPromises);
+                
+                if (result) {
+                    console.log(`找到元素: ${result.name}`);
+                    try {
+                        await result.action();
+                        startIndex = result.index + 1;
+                    } catch (error) {
+                        console.log(`执行 ${result.name} 操作失败:`, error.message);
+                        startIndex = result.index + 1;
+                    }
+                } else {
+                    startIndex++;
+                }
+            }
+            console.log("登陆成功！")
+            await sleep(300000); // 最终等待
+        } catch (error) {
+            console.error('执行过程中出错:', error);
         } finally {
-            await page.close();
+            if (page) {
+                await page.close();
+            }
         }
     }
+    
 
     async test(browser, number) {
         const page = await browser.newPage();
@@ -196,13 +361,13 @@ class ChromeController {
             await page.goto('chrome-extension://mcohilncbfahbmgdjkbpemcciiolgcge/popup.html');
             
             // 等待页面加载
-            await page.waitForTimeout(2000);
+            await sleep(2000);
 
             // 检查是否需要输入密码（首次使用）
             const passwordInput = await page.$('input[type="password"]');
             if (passwordInput) {
                 console.log(`Chrome ${number} OKX 钱包首次登录，设置密码`);
-                await passwordInput.type('your_password_here'); // 替换为实际密码
+                await passwordInput.type(config.password); // 替换为实际密码
                 
                 // 点击确认按钮
                 const confirmButton = await page.$('button[type="submit"]');
@@ -212,7 +377,7 @@ class ChromeController {
             }
 
             // 等待登录完成
-            await page.waitForTimeout(2000);
+            await sleep(2000);
             console.log(`Chrome ${number} OKX 钱包登录成功`);
 
         } catch (error) {
