@@ -25,6 +25,93 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * 等待页面和所有资源完全加载
+ * @param {Page} page Playwright页面对象
+ * @param {Object} options 配置选项
+ * @param {number} options.timeout 超时时间(ms)，默认60000ms
+ * @param {string} options.polling 轮询方式，默认'mutation'
+ * @returns {Promise<void>}
+ */
+async function waitForPageLoadComplete(page, options = {}) {
+    const {
+        timeout = 60000,
+        polling = 'mutation'
+    } = options;
+
+    try {
+        await page.waitForFunction(
+            () => {
+                return window.performance.getEntriesByType('resource')
+                    .every(r => r.responseEnd > 0) && 
+                    document.readyState === 'complete';
+            },
+            {
+                timeout,
+                polling
+            }
+        );
+    } catch (error) {
+        if (error.name === 'TimeoutError') {
+            throw new Error(`Page load timeout after ${timeout}ms`);
+        }
+        throw error;
+    }
+}
+
+async function waitAndClickButton(page, selector, options = {}) {
+    const {
+        timeout = 30000,
+        waitForNavigation = false  // 默认不等待导航，因为不是所有按钮点击都会触发页面跳转
+    } = options;
+
+    try {
+        // 1. 等待按钮出现且可见
+        await page.waitForSelector(selector, {
+            visible: true,
+            timeout
+        });
+
+        // 2. 确保按钮可点击
+        await page.waitForFunction(
+            (sel) => {
+                const element = document.querySelector(sel);
+                if (!element) return false;
+                
+                // 获取元素的计算样式
+                const style = window.getComputedStyle(element);
+                
+                // 检查元素是否真的可见和可交互
+                return (
+                    style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    style.opacity !== '0' &&
+                    !element.disabled &&
+                    element.offsetParent !== null
+                );
+            },
+            { timeout },
+            selector
+        );
+
+        // 3. 执行点击操作
+        if (waitForNavigation) {
+            // 如果需要等待导航，使用 Promise.all
+            await Promise.all([
+                page.waitForNavigation({ waitUntil: 'networkidle0' }),
+                page.click(selector)
+            ]);
+        } else {
+            // 直接点击
+            await page.click(selector);
+        }
+
+    } catch (error) {
+        console.error(`Failed to wait and click element: ${selector}`, error);
+        throw error;
+    }
+}
+
 class ChromeController {
     constructor() {
         this.commands = new Map();
@@ -81,9 +168,11 @@ class ChromeController {
     
             await this.okxLogin(browser, number);
             page = await browser.newPage();
-            await page.goto('https://testnet.humanity.org/login');
-            await sleep(5000);
-            console.log(`${number} 访问登录页面成功`);
+            await page.goto('https://testnet.humanity.org/login', {
+                waitUntil: ['networkidle0', 'domcontentloaded'],
+                timeout: 50000
+            });
+            console.log(`${number} 页面加载完毕`);
     
             // 定义元素检查配置
             const elementConfigs = [
@@ -103,8 +192,8 @@ class ChromeController {
                     action: async () => {
                         await page.click('div.iekbcc0.ju367v4.ju367va.ju367v14.ju367v1s');
                         console.log('点击 MetaMask 选项成功');
-                        
                         await sleep(2000);
+
                         const pages = await browser.pages();
                         const metamaskPopup = pages.find(page => {
                             const url = page.url();
@@ -116,9 +205,9 @@ class ChromeController {
                         }
     
                         console.log('成功获取 MetaMask 弹窗');
-                        await metamaskPopup.waitForSelector('[data-testid="okd-button"]');
+                        await metamaskPopup.waitForSelector('button.btn-fill-highlight[data-testid="okd-button"]');
                         console.log('获取连接按钮成功');
-                        await metamaskPopup.click('[data-testid="okd-button"]');
+                        await metamaskPopup.click('button.btn-fill-highlight[data-testid="okd-button"]');
                         console.log('点击连接按钮成功');
                     }
                 },
@@ -142,7 +231,6 @@ class ChromeController {
                         }
     
                         console.log('成功获取 MetaMask notification 弹窗');
-                        await sleep(2000);
                         await notificationPopup.waitForSelector('button.btn-fill-highlight[data-testid="okd-button"]');
                         await notificationPopup.click('button.btn-fill-highlight[data-testid="okd-button"]');
                         console.log('点击确认按钮成功');
@@ -162,21 +250,33 @@ class ChromeController {
                     name: 'genisisReward',
                     timeout: 30000,
                     action: async () => {
+                        await waitForPageLoadComplete(page);
+                        console.log(`${number} 页面加载完毕`);
+
+                        // 等待RWT值正确加载
+                        await page.waitForFunction(
+                            () => {
+                                const rwtElement = document.querySelector('span.number');
+                                return rwtElement && rwtElement.textContent && !rwtElement.textContent.includes('- $RWT');
+                            },
+                            { timeout: 30000 }
+                        );
+
+                        console.log(`${number} 页面渲染完毕`);
                         await sleep(2000);
-                        await page.waitForSelector('div.bottom[data-v-1fc95287]', { 
-                            visible: true,
-                            timeout: 5000 
-                        });
+
                         const status = await page.evaluate(() => {
-                            const button = document.querySelector('div.bottom');
+                            const button = document.querySelector('div[data-v-1fc95287].bottom');
                             return {
                                 hasBeenClaimed: button && button.classList.contains('disable'),
                                 buttonText: button ? button.textContent.trim() : '',
                                 exists: !!button
                             };
                         });
-                        if (status) {
+                        if (status.hasBeenClaimed) {
                             console.log('奖励已经领取过了');
+                            await sleep(5000);
+
                             return; // 或执行其他逻辑
                         }
                         await page.click('div.bottom[data-v-1fc95287]');
@@ -191,12 +291,12 @@ class ChromeController {
                         if (!notificationPopup) {
                             throw new Error('未找到 MetaMask notification 弹窗');
                         }
-    
+
                         console.log('成功获取 MetaMask notification 弹窗');
-                        await sleep(2000);
-                        await notificationPopup.waitForSelector('button.btn-fill-highlight[data-testid="okd-button"]');
-                        await notificationPopup.click('button.btn-fill-highlight[data-testid="okd-button"]');
+                        await waitAndClickButton(notificationPopup, 'button[data-testid="okd-button"]:nth-child(2)');
+
                         console.log('成功领取奖励!');
+                        await sleep(5000);
                     }
                 }
             ];
@@ -232,7 +332,11 @@ class ChromeController {
                 }
             }
             console.log("登陆成功！")
-            await sleep(300000); // 最终等待
+            await waitForPageLoadComplete(page);
+
+            console.log("页面加载和交互完成！");
+            await sleep(5000);
+
         } catch (error) {
             console.error('执行过程中出错:', error);
         } finally {
@@ -358,7 +462,10 @@ class ChromeController {
         try {
             console.log(`正在处理 OKX 钱包登录 ${number}`);
             // OKX 钱包插件的 Chrome extension ID
-            await page.goto('chrome-extension://mcohilncbfahbmgdjkbpemcciiolgcge/popup.html');
+            await page.goto('chrome-extension://mcohilncbfahbmgdjkbpemcciiolgcge/popup.html', {
+                waitUntil: ['networkidle0', 'domcontentloaded'],
+                timeout: 50000
+            });
             
             // 等待页面加载
             await sleep(2000);
@@ -377,7 +484,7 @@ class ChromeController {
             }
 
             // 等待登录完成
-            await sleep(2000);
+            await waitForPageLoadComplete(page);
             console.log(`Chrome ${number} OKX 钱包登录成功`);
 
         } catch (error) {

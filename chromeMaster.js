@@ -8,11 +8,13 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 const AdmZip = require('adm-zip');
 const ChromeController = require('./chromeController');
+const dotenv = require('dotenv');
 
 class ChromeManager {
     constructor() {
         this.CHROME_PATH = '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"';
-        this.BASE_DIR = path.join(process.cwd(), 'USERDATA');
+        // 从环境变量获取 BASE_DIR，如果未设置则使用默认值
+        this.BASE_DIR = process.env.CHROME_USER_DATA_DIR || path.join(process.cwd(), 'USERDATA');
         
         // 窗口基础设置
         this.WINDOW_WIDTH = 525;
