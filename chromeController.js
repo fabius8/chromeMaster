@@ -154,6 +154,7 @@ class ChromeController {
 
     async humanrity(browser, number) {
         let page = null;
+        let reachedGenisisReward = false;  // 添加标志位
         try {
             await sleep(2000);
             // 清理残留页面
@@ -248,22 +249,23 @@ class ChromeController {
                 {
                     selector: 'div.bottom[data-v-1fc95287]',
                     name: 'genisisReward',
-                    timeout: 30000,
+                    timeout: 60000,
                     action: async () => {
+                        reachedGenisisReward = true;  // 设置标志位
                         await waitForPageLoadComplete(page);
                         console.log(`${number} 页面加载完毕`);
 
                         // 等待RWT值正确加载
                         await page.waitForFunction(
                             () => {
-                                const rwtElement = document.querySelector('span.number');
+                                const rwtElement =  document.querySelector('div[data-v-1fc95287] .list .item:nth-child(2) span.number');;
                                 return rwtElement && rwtElement.textContent && !rwtElement.textContent.includes('- $RWT');
                             },
                             { timeout: 30000 }
                         );
 
                         console.log(`${number} 页面渲染完毕`);
-                        await sleep(2000);
+                        await sleep(5000);
 
                         const status = await page.evaluate(() => {
                             const button = document.querySelector('div[data-v-1fc95287].bottom');
@@ -296,6 +298,11 @@ class ChromeController {
                         await waitAndClickButton(notificationPopup, 'button[data-testid="okd-button"]:nth-child(2)');
 
                         console.log('成功领取奖励!');
+                        await sleep(5000);
+
+                        await waitForPageLoadComplete(page);
+            
+                        console.log("页面加载和交互完成！");
                         await sleep(5000);
                     }
                 }
@@ -331,17 +338,17 @@ class ChromeController {
                     startIndex++;
                 }
             }
-            console.log("登陆成功！")
-            await waitForPageLoadComplete(page);
 
-            console.log("页面加载和交互完成！");
-            await sleep(5000);
 
         } catch (error) {
             console.error('执行过程中出错:', error);
         } finally {
             if (page) {
                 await page.close();
+            }
+            if (!reachedGenisisReward) {  // 如果没有达到最后一步，则重新执行
+                console.log('未执行到 genisisReward，重新尝试...');
+                await this.humanrity(browser, number);
             }
         }
     }
